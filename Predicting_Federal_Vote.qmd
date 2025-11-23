@@ -1,0 +1,884 @@
+---
+title: "From Survey to Population: Predicting Federal Popular Vote Shares Using Multinomial Logit Post-Stratification"
+author: "GROUP 46: Narae Lee, Nikita Jain, Radia Salam"
+date: November 20, 2025
+subtitle: "STA304 - Assignment 2"
+
+format:
+  pdf:
+    number-sections: false
+    include-in-header:
+      text: |
+        \usepackage{caption}
+        \captionsetup[table]{labelformat=empty}
+---
+
+```{r, include=FALSE}
+library(tidyverse)
+library(openintro)
+library(janitor)     
+library(skimr)   
+library(dplyr)
+library(forcats)
+library(scales) 
+library(nnet)
+library(kableExtra)
+library(tinytex)
+theme_set(theme_minimal())
+```
+
+# 1 Introduction
+
+In the wake of the 2025 Canadian federal elections, renewed public attention has turned toward understanding the forces that shape electoral outcomes in Canada. The heightened visibility of this election, characterised by shifting party strategies, intensified media scrutiny, and global interest in Canada’s political direction, has revived a longstanding democratic question: who truly determines political power in Canada? Examining who participates, how preferences differ across demographic groups, and which voters ultimately influence federal outcomes is essential for understanding Canada’s political landscape. Predicting national vote patterns, therefore, provides more than a forecast. It offers an analytical window into how Canadians’ social, economic, and regional identities shape their engagement with electoral politics.
+
+Our analysis draws on two complementary datasets: the 2021 Canadian Election Study (CES), a nationally representative survey capturing individual-level demographic characteristics and reported vote choice, and the 2021 Canadian Census, which describes the true population distribution across age, education, gender, religion, provincial categories, etc. Using these datasets together allows us to address non-representativeness in survey samples where certain groups, particularly young adults, immigrants, and individuals with lower socio-economic status, are systematically underrepresented in surveys and in electoral participation (Uppal & Larochelle-Côté, 2012)). To contextualize the analysis, we define key terms: **partisanship** refers to an individual’s psychological attachment to a political party, **ideology** describes their position along the left–right policy spectrum, **SES** denotes socio-economic status, and **post-stratification** is a reweighting technique that adjusts model predictions to reflect true population proportions and generate more reliable national voting estimates.
+
+The literature provides insights into the uneven distribution of Canadian voting patterns by reflecting persistent social and ideological divisions shaped by age, education, and geography. Young adults aged 18 to 24 consistently have the lowest turnout nationwide, usually around 50 percent, while turnout rises steadily with age and peaks above 80 percent among seniors (Uppal & Larochelle-Côté, 2012). Past research shows long-standing differences in voting patterns between Canadians with and without a university degree, with university-educated voters historically moving between parties in ways that mirror broader ideological realignments (Blais, 2005). Studies note educated voters shifting their party preferences over time, showing stronger engagement in recent elections(Gidengil, 2022; (Barisonzi, 2021). Regional differences further deepen these divides: provinces like Ontario and Quebec have deeper political and social divisions that shape partisanship, while Atlantic provinces tend to show weaker socioeconomic divides (McGrane, 2007). Since regional context and class-based voting changes the strength and direction of demographic effects, provinces help account for differences in political landscapes that influence vote choice (Polacko, 2025). Prairie provinces lean strongly conservative, while Quebec and Canada’s major metropolitan centres tend to favour more centrist or left-of-centre parties (Lucas & Armstrong, 2021). These intersecting patterns highlight that political behaviour in Canada is shaped by structural forces, underscoring the importance of demographic composition for predicting national electoral outcomes.
+
+Anchored in this theoretical foundation, our research aims to address the following question: **“How do age, education, and provincial regions jointly shape predicted support for the Liberal, Conservative, and New Democratic Parties?”** As our model estimates support for multiple parties simultaneously, we employ multinomial logistic regression to predict the probability of choosing each party relative to a baseline. Guided by established findings, we hypothesize that younger and more highly educated voters will exhibit stronger support for the NDP, whereas older and less educated voters will favour the Conservative Party. We further expect substantial regional heterogeneity, with Conservative support concentrated in the Prairies, while the Liberals and NDP will receive more support in British Columbia and Quebec (Lucas & Armstrong, 2021; McGrane, 2014). By integrating survey-based modelling with census-derived demographic weighting, this study provides population-grounded estimates of federal party support and reveals the demographic and regional structures that underpin contemporary Canadian electoral behaviour.
+
+# 2 Data
+
+This study draws on two primary data sources: the 2021 Canadian Election Study (CES) and the 2021 Canadian Census. The CES was collected during the 2021 federal election through two survey waves, one during the campaign and one post-election between August 17 and October 2, 2021, and contains responses from 15,069 individuals (Stephenson et al., 2022). The survey includes information on demographic characteristics (age, education, province, gender, religion) and reported vote choice, enabling the construction of a multinomial model of party support. The 2021 Canadian Census, collected by Statistics Canada, provides authoritative population counts across demographic categories, including age, education, and province. The census dataset plays a crucial role in the post-stratification stage by providing the true population proportions needed to correct sampling imbalances in the CES.
+
+All data cleaning and preprocessing were completed in R, ensuring a reproducible workflow. We restricted the CES sample to those reporting support for the Liberal, Conservative, or NDP parties and then selected three predictors as shown in Table 2.1:
+
+```{r, include=FALSE, warning=FALSE}
+
+library(tidyverse)
+
+survey_raw <- read_csv("ces2021.csv", show_col_types = FALSE)
+
+```
+
+```{r, include=FALSE, warning=FALSE}
+survey_data <- survey_raw %>%
+  mutate(
+    # use cps21_age directly (it is already NUMERIC)
+    age = as.numeric(cps21_age),
+
+    # ensure impossible ages become NA
+    age = ifelse(age < 18 | age > 100, NA, age),
+
+    # AGE GROUPS
+    age_grp = cut(
+      age,
+      breaks = c(18,25,35,45,55,65,Inf),
+      labels = c("18-24","25-34","35-44","45-54","55-64","65+"),
+      right = FALSE
+    )
+  )
+
+summary(survey_data$age)
+summary(survey_data$age_grp)
+
+
+```
+
+```{r, include=FALSE, warning=FALSE}
+survey_data <- survey_raw %>%
+  mutate(
+    # ----- AGE + AGE GROUPS -----
+    age = as.numeric(cps21_age),
+    age = ifelse(age < 18 | age > 100, NA, age),
+
+    age_grp = cut(
+      age,
+      breaks = c(18, 25, 35, 45, 55, 65, Inf),
+      labels = c("18-24","25-34","35-44",
+                 "45-54","55-64","65+"),
+      right = FALSE
+    ),
+
+    # ----- 3-CATEGORY VOTE: CPS campaign vote choice -----
+    vote_3cat = case_when(
+      cps21_votechoice == 1 ~ "Liberal",
+      cps21_votechoice == 2 ~ "Conservative",
+      cps21_votechoice == 3 ~ "NDP",
+      TRUE                  ~ NA_character_
+    ),
+    vote_3cat = factor(
+      vote_3cat,
+      levels = c("Liberal","Conservative","NDP")
+    ),
+
+    # ----- EDUCATION (numeric 1–12, then factor) -----
+    educ = factor(cps21_education),
+
+    # ----- PROVINCE → 6 REGIONS -----
+    prov_region = case_when(
+      cps21_province %in% c(5, 7, 4, 10) ~ "Atlantic",   # NL, NS, NB, PE
+      cps21_province == 11              ~ "Quebec",
+      cps21_province == 9               ~ "Ontario",
+      cps21_province %in% c(3, 12, 1)   ~ "Prairies",   # MB, SK, AB
+      cps21_province == 2               ~ "BC",
+      cps21_province %in% c(6, 8, 13)   ~ "Territories",# NT, NU, YT
+      TRUE ~ NA_character_
+    ),
+    prov_region = factor(
+      prov_region,
+      levels = c("Atlantic","Quebec","Ontario",
+                 "Prairies","BC","Territories")
+    )
+  )
+
+
+# summary(survey_data$age)
+# summary(survey_data$age_grp)
+# summary(survey_data$educ)
+# summary(survey_data$prov_region)
+# summary(survey_data$vote_3cat)
+```
+
+```{r, include=FALSE, warning=FALSE}
+Table1_age <- survey_data %>%
+  summarise(
+    Mean   = mean(age, na.rm = TRUE),
+    Median = median(age, na.rm = TRUE),
+    SD     = sd(age, na.rm = TRUE),
+    Min    = min(age, na.rm = TRUE),
+    Max    = max(age, na.rm = TRUE)
+  )
+
+# Age group distribution
+Table1_age_grp <- survey_data %>%
+  filter(!is.na(age_grp)) %>%
+  count(age_grp, name = "Count") %>%
+  mutate(Percent = round(100 * Count / sum(Count), 1))
+
+# Education distribution
+Table1_educ <- survey_data %>%
+  filter(!is.na(educ)) %>%
+  count(educ, name = "Count") %>%
+  mutate(Percent = round(100 * Count / sum(Count), 1))
+
+# Region distribution
+Table1_region <- survey_data %>%
+  filter(!is.na(prov_region)) %>%
+  count(prov_region, name = "Count") %>%
+  mutate(Percent = round(100 * Count / sum(Count), 1))
+
+# Vote choice distribution (3-category)
+Table1_vote <- survey_data %>%
+  filter(!is.na(vote_3cat)) %>%
+  count(vote_3cat, name = "Count") %>%
+  mutate(Percent = round(100 * Count / sum(Count), 1))
+
+```
+
+```{r, echo=FALSE, warning=FALSE}
+
+Table1_all <- bind_rows(
+  Table1_age_grp %>%
+    mutate(Variable = "Age group",
+           Category = as.character(age_grp)) %>%
+    select(Variable, Category, Count, Percent),
+
+  Table1_educ %>%
+    mutate(Variable = "Education",
+           Category = as.character(educ)) %>%
+    select(Variable, Category, Count, Percent),
+
+  Table1_region %>%
+    mutate(Variable = "Region",
+           Category = as.character(prov_region)) %>%
+    select(Variable, Category, Count, Percent),
+
+  Table1_vote %>%
+    mutate(Variable = "Vote choice",
+           Category = as.character(vote_3cat)) %>%
+    select(Variable, Category, Count, Percent)
+)
+
+Table1_all %>%
+  arrange(Variable, Category) %>%
+  kbl(
+    caption   = "Table 2.1 Distributions of key variables in the CES 2021 analysis sample.",
+    booktabs  = TRUE,
+    col.names = c("Variable", "Category", "Count", "Percent")
+  ) %>%
+  kable_styling(full_width = FALSE, position = "center")
+
+
+```
+
+**Age:** The CES raw age variable (cps21_age) was converted into numeric values and grouped into six categories. These categories align with the census data codes and each represents a ten-year range (except the last one): 18–24, 25–34, 35–44, 45–54, 55–64, and 65+. Ages below 18 or above 100 were coded as missing.
+
+**Education:** The CES education variable was originally coded on an ordered scale from 1 (no schooling) to 11 (professional degree). This was retained as an ordered factor; 12 (“missing”) was recorded as NA. Any census education codes that did not appear in the survey data were removed.
+
+**Province:** To ensure stable estimates for smaller jurisdictions and maintain comparability, provinces were merged into six broader regional categories using the census province codes. Yukon, Northwest Territories, and Nunavut were combined as the Territories. Newfoundland and Labrador, Nova Scotia, New Brunswick, and Prince Edward Island formed the Atlantic region. Manitoba, Saskatchewan, and Alberta became the Prairies. Ontario, Quebec, and British Columbia were retained as standalone regions due to their large populations and distinct political contexts.
+
+Each respondent was matched to one category for age, education, and region. Respondents with missing values were removed, leaving data only for those who completed the vote choice, age group, education level, and region.
+
+The census was aggregated into combinations of age group, education level, and region, creating 491 demographic cells with population counts. These serve as post-stratification weights, ensuring predictions from the CES reflect the Canadian electorate. The cleaned dataset supports analysis of how demographic factors shape vote choice and adjustment for population structure.
+
+```{r, include=FALSE, warning=FALSE}
+
+model_data <- survey_data %>%
+  filter(
+    !is.na(vote_3cat),
+    !is.na(age_grp),
+    !is.na(educ),
+    !is.na(prov_region)
+  ) %>%
+  transmute(
+    age_grp,
+    educ,
+    prov_region,
+    vote_3cat
+  )
+
+# str(model_data)
+# table(model_data$vote_3cat)
+
+# multinomial logit model: vote_3cat ~ age_grp + educ + prov_region
+set.seed(304) 
+mnl_fit <- multinom(vote_3cat ~ age_grp + educ + prov_region,
+                    data = model_data,
+                    trace = FALSE)
+
+# summary(mnl_fit)
+```
+
+```{r, echo=FALSE, fig.width=5, fig.height=3, fig.align='center'}
+ggplot(model_data, aes(x = age_grp, fill = vote_3cat)) +
+geom_bar(position = "fill") +
+scale_y_continuous(labels = scales::percent_format()) +
+labs(
+title = "Figure 2.1: Distribution of Vote Choice by Age Group",
+x = "Age Group",
+y = "Share of Respondents",
+fill = "Vote Choice"
+) +
+theme_minimal(base_size = 12)+
+  theme(
+    plot.title = element_text(size = 11, face = "bold", hjust = 0.5),
+    axis.title = element_text(size = 10)   
+  )
+
+
+```
+
+A preliminary exploratory data analysis (EDA) examined voting patterns across all demographic variables in the CES. Although the dataset includes additional characteristics such as gender, religion, and income, our modelling focuses on age, education, and province, variables consistently identified in the literature as key predictors of vote choice and the only ones for which compatible population counts are available in the Census, making them appropriate for post-stratification. Figure 2.1 presents the distribution of vote choice across the six age groups using 100% stacked bars, enabling direct comparison across demographic segments. The EDA revealed expected patterns: younger respondents showed stronger support for the NDP, while older individuals tended to favour the Conservatives; higher educational attainment was associated with increased Liberal support, whereas lower education levels aligned more with Conservative preferences. Regionally, the Prairies exhibited the highest Conservative support, and the Territories leaned more Liberal. Full graphical summaries are available in Section 9 (Appendix). Collectively, these trends highlight clear demographic structuring in Canadian voting behaviour and provide motivation for the modelling strategy that follows.
+
+```{r, echo=FALSE, include=FALSE}
+census_data <- read_csv("canada_census2021.csv")
+
+census_data <- census_data %>%
+  mutate(
+    # --- age groups using agegrp codes ---
+    # (7:8 18–24, 9:10 25–34, 11:13 35–44, 14:15 45–54, 16:17 55–64, 18:21 65+)
+    age_grp = case_when(
+      agegrp %in% 7:8   ~ "18-24",
+      agegrp %in% 9:10  ~ "25-34",
+      agegrp %in% 11:13 ~ "35-44",
+      agegrp %in% 14:15 ~ "45-54",
+      agegrp %in% 16:17 ~ "55-64",
+      agegrp %in% 18:21 ~ "65+",
+      TRUE              ~ NA_character_
+    ),
+    age_grp = factor(
+      age_grp,
+      levels = c("18-24","25-34","35-44","45-54","55-64","65+")
+    ),
+
+    # --- education: match survey's educ = factor(1:12) ---
+    educ = factor(hdgree),
+
+    # --- province → same 6 regions ---
+    prov_region = case_when(
+      pr %in% c(10,11,12,13) ~ "Atlantic",   # NL, PE, NS, NB
+      pr == 24              ~ "Quebec",
+      pr == 35              ~ "Ontario",
+      pr %in% c(46,47,48)   ~ "Prairies",   # MB, SK, AB
+      pr == 59              ~ "BC",
+      pr == 70              ~ "Territories",
+      TRUE                  ~ NA_character_
+    ),
+    prov_region = factor(
+      prov_region,
+      levels = c("Atlantic","Quebec","Ontario",
+                 "Prairies","BC","Territories")
+    )
+  )
+
+# summary(census_data$age_grp)
+# summary(census_data$educ)
+# summary(census_data$prov_region)
+```
+
+```{r, include=FALSE}
+census_cells <- census_data %>%
+  group_by(age_grp, educ, prov_region) %>%
+  summarise(N = n(), .groups = "drop")
+
+head(census_cells)
+nrow(census_cells)
+sum(census_cells$N)
+```
+
+```{r, include=FALSE}
+census_cells <- census_cells %>%
+  filter(educ %in% levels(model_data$educ)) %>%   # drops educ 13, 88 etc
+  mutate(
+    age_grp    = factor(age_grp,    levels = levels(model_data$age_grp)),
+    educ       = factor(educ,       levels = levels(model_data$educ)),
+    prov_region = factor(prov_region, levels = levels(model_data$prov_region))
+  )
+
+str(census_cells)
+```
+
+```{r, include=FALSE, warning=FALSE}
+probs_mat <- predict(mnl_fit, newdata = census_cells, type = "probs")
+probs_df  <- as.data.frame(probs_mat)
+
+colnames(probs_df) <- c("Liberal", "Conservative", "NDP")
+
+census_cells <- bind_cols(census_cells, probs_df)
+
+# str(census_cells)
+```
+
+# 3 Methods
+
+**3.1 Model Specifics**
+
+To analyze vote choice across multiple political parties, this study employs **multinomial logistic regression,** a generalization of logistic regression for multiclass problems. Unlike standard logistic regression, which is limited to binary outcomes, the multinomial logistic regression model models a categorical dependent variable with more than two categories. In this context, the model estimates the probability that a respondent supports one of three political parties: Liberal, Conservative, or NDP, as indicated by the formulae below.
+
+**Multinominal Logit Model : vote_3cat \~ge_grp + educ + prov_region**
+
+\textbf{Conservative vs. Liberal}
+
+$$\log(\frac{P_i C}{P_i L}) = \beta_{0C} + \beta_{C} (age) \cdot AgeGroup_i + \beta_C (educ) \cdot Education + \beta_{C} (prov) \cdot Region_i$$
+
+\textbf{NDP vs. Liberal}
+
+$$\log(\frac{P_i N}{P_i L}) = \beta_{0N} + \beta_{N} (age) \cdot AgeGroup_i + \beta_N (educ) \cdot Education + \beta_{N} (prov) \cdot Region_i$$
+
+where $P_{iL}$ represents predicted probability of voting for Liberal where $P_{iC}$ represents predicted probability of voting for Conservative where $P_{iN}$ represents predicted probability of voting for NDP
+
+The Liberal Party serves as the baseline category. Each estimated coefficient indicates how a predictor alters the log odds of selecting either the Conservative or NDP option relative to the Liberal Party. Positive coefficients reflect an increase in the log odds of choosing that party relative to Liberal, while negative coefficients reflect a decrease. As outlined in Section 2, the three predictors included are age, education, and province. Age is associated with differences in voter turnout; education captures persistent divides in political behaviour and province reflects regional political cultures that influence party support. This model is appropriate for the data because all predictors are categorical, and existing theory suggests strong demographic structuring of party support (Gidengil 2022; Merkley 2022).
+
+The primary parameters of interest are the predicted probabilities of voting Liberal, Conservative, or NDP for each demographic cell, which subsequently serve as the basis for post-stratification. This method relies on standard assumptions, including independence of observations, correct model specification, and the assumption that the log odds of each category exhibit a linear relationship with the predictors.
+
+**3.2 Post-Stratification**
+
+In surveys such as CES2021, which use non-probability sampling methods, respondents may not reflect key population characteristics in proportion because selection is not random. The dataset may systematically overrepresent certain demographic groups, resulting in raw multinomial predictions that do not accurately reflect national voting behaviour. To address this limitation, post-stratification is used to align model predictions with the population's actual demographic distribution, as reported in the 2021 Canadian Census.
+
+Post-stratification divides the population into demographic cells, then applies model predictions to each. Cells are based on model variables: age group, education, and province. Each Canadian is assigned to one cell j. The census supplies cell size $N_j$. With the multinomial logistic regression model fit to the CES sample, the probability that each cell votes Liberal, Conservative, or NDP is calculated as $\hat{y}_{jL}$, $\hat{y}_{jC}$, $\hat{y}_{jN}$. The general formula is:
+
+The general formula is:
+
+$$\hat{y}_{PS} = \frac{\sum_{j}{N_j \hat{y}_j}}{\sum_{j}{N_j}}$$
+
+where $\hat{y}_j$ : Model-predicted probability of voting for a party in cell j
+
+$N_j$ : Population count of cell j
+
+This formula multiplies the model's predicted probability for each demographic cell by the cell's true population size, then averages across all cells. This process yields corrected estimates that incorporate actual demographic proportions rather than those present in the CES sample. The approach is particularly valuable because it corrects for CES sampling imbalances and provides population-level estimates grounded in census demographic data. Collectively, the methodology of multinomial logistic regression followed by census-calibrated post-stratification enables the translation of individual-level survey responses into nationally representative estimates of partisan support.
+
+# 4 Results
+
+```{r, echo=FALSE, warning=FALSE}
+vote_counts <- tibble(
+  Party = c("Liberal", "Conservative", "NDP"),
+  Count = c(1700, 1552, 1183)
+)
+
+kable(vote_counts,
+      caption = "Table 4: Sample Sizes by Vote Choice in the Multinomial Model",
+      align = "lc") %>%
+  kable_classic(full_width = FALSE)
+
+```
+
+We estimated a multinomial logistic regression model as outlined in Section 3.1 predicting support for the Liberal, Conservative, and New Democratic Parties, treating the Liberal Party as the baseline in all comparisons. Table 4 reports the post-stratified predicted popular vote proportions for each of the political parties. We will further summarize the effects of age, education, and provincial region, each evaluated relative to the Liberal baseline and the specific reference category to illustrate how demographic and geographic stratification shapes predicted vote choice.
+
+**4.1 Stratified Predictors of Partisan Support**
+
+```{r, echo=FALSE, warning=FALSE}
+
+coef_table <- tribble(
+  ~Party, ~Intercept, ~`Age 25-34`, ~`Age 35-44`, ~`Age 45-54`, ~`Age 55-64`, ~`Age 65+`,
+  "Conservative", 10.446066, -0.3314363, -0.1526158, -0.2072664, -0.2374628, -0.1506431,
+  "NDP",          -6.127715, -0.5634442, -0.9324807, -1.5698483, -1.8638922, -2.0061671
+)
+
+kable(coef_table,
+      caption = "Table 4.1.1: Age Group Coefficients Relative to the Liberal (18-24) Baseline",
+      digits = 3,
+      align = "lcccccc") %>%
+  kable_classic(full_width = FALSE)
+
+```
+
+The regression coefficients in Table 4.1.1 reveal clear age-based divides in vote choice, with the Liberal Party and the 18–24 age group serving as baseline categories. Each coefficient therefore reflects the change in the log-odds of supporting either the Conservative Party or the NDP relative to supporting the Liberal Party for voters in each older age group. Across all age categories (25–34 through 65+), the Conservative coefficients are consistently negative, indicating that older individuals are less likely than younger adults to choose Conservatives over Liberals, suggesting a slight youth tilt toward Conservative support. This effect is most pronounced for the NDP, whose coefficients become increasingly negative with age, reflecting a decline in NDP affinity among older Canadians ((Uppal & Larochelle-Côté, 2012; Merkley, 2022).
+
+```{r, echo=FALSE, warning=FALSE}
+
+educ_table <- tibble(
+  Education = paste0("educ", 2:12),
+  Conservative = c(-35.708946, -8.820252, -10.154033, -10.547690, -10.470604,
+                   -10.379848, -10.931030, -10.977384, -11.145828, -11.182782, -10.075372),
+  NDP = c(6.566511, 8.445929, 7.415704, 7.017769, 7.270904,
+          7.304647, 6.921462, 6.713563, 6.779997, 6.445787, 6.667328)
+)
+
+kable(educ_table,
+      caption = "Table 4.1.2: Education Coefficients Relative to the Liberal (Lower Education) Baseline",
+      digits = 3) %>%
+  kable_classic(full_width = FALSE)
+
+```
+
+The coefficients in Table 4.1.2 reveal a clear and consistent education-based gradient in partisan alignment relative to the Liberal and lower education respondents (educ1-educ3). Individuals with lower education show substantially lower odds of supporting the Conservatives over Liberals. Moreover, higher education groups (educ10–educ12) display less negative Conservative coefficients, suggesting that Conservative support becomes comparatively more competitive among more educated voters. For the NDP, higher education groups consistently exhibit positive coefficients as individuals with greater educational attainment are more likely to choose the NDP over the Liberal Party, whereas lower-education groups show weaker NDP preferences, as highlighted by Polacko (2025).
+
+```{r, echo=FALSE, warning=FALSE}
+region_table <- tibble(
+  Region = c("Quebec", "Ontario", "Prairies", "BC", "Territories"),
+  Conservative = c(
+    -0.04449361,
+    0.361031675,
+    1.0884771,
+    0.4726571,
+    -0.2304776
+  ),
+  NDP = c(
+    -0.33130253,
+    0.001026012,
+    0.4621957,
+    0.7074711,
+    -0.3260113
+  )
+)
+
+kable(
+  region_table,
+  caption = "Table 4.1.3: Regional Coefficients Relative to Liberal (Atlantic Region) Baseline",
+  digits = 3
+) %>%
+  kable_classic(full_width = FALSE)
+
+```
+
+Regional differences in Table 4.1.3 show how the log-odds of supporting the Conservatives or the NDP change relative to Liberals and the Atlantic baseline. Quebec exhibits slightly lower Conservative support than Atlantic Canada, while Ontario and British Columbia show modest positive coefficients, indicating a small shift toward Conservative preference. The Prairies display by far the strongest Conservative advantage, consistent with their longstanding right-leaning orientation (Lucas & Armstrong, 2021). For the NDP, British Columbia has the largest positive coefficient, followed by the Prairies, signalling concentrated regional support, whereas Quebec’s negative coefficient indicates weaker NDP affinity and a more centrist or Liberal-leaning profile. Overall, the estimates align with established regional voting patterns and demonstrate that the model successfully captures expected geographic heterogeneity in Canadian electoral behaviour.
+
+**Section 4.2 Post-Stratified Predicted Popular Vote**
+
+```{r, echo=FALSE, warning=FALSE}
+ps_table <- tibble(
+  Party = c("Liberal", "Conservative", "NDP"),
+  `Estimated Vote Share (%)` = c(36.5, 35.2, 28.3)
+)
+
+kable(
+  ps_table,
+  caption = "Table 4.2: Post-Stratified Predicted National Popular Vote",
+  digits = 1
+) %>%
+  kable_classic(full_width = FALSE)
+
+```
+
+Table 4.2 presents the post-stratified predicted national popular vote estimates with the Liberal Party projected to receive 36.5% of the popular vote, closely followed by the Conservatives at 35.2%, with the NDP at 28.3%. This narrow Liberal–Conservative margin mirrors recent electoral patterns in Canada, where both parties draw broad but distinct demographic and regional support (Lucas & Armstrong, 2021). The comparatively lower NDP estimate shows that while the party performs strongly among younger and highly educated voters, its support is more concentrated across particular provinces and age cohorts (Merkley, 2022; Uppal & Larochelle-Côté, 2012). 
+
+# 5 Discussion
+
+Our analysis evaluates how age, education, and region shape support for Canada’s major federal parties. Drawing on prior research, we hypothesized that younger, highly educated voters favour the NDP; older, less educated voters lean Conservative; and regional differences, with strong Prairie conservatism and left-leaning preferences in British Columbia and Quebec, shape support. We used a multinomial logistic regression (Liberal Party as baseline) and census-based post-stratification to adjust for demographic and sampling imbalances. This provided population-representative estimates of vote choice for a nuanced understanding of demographic forces in Canada’s electoral landscape.
+
+The results broadly confirm our expectations. Age patterns show that 18–24-year-olds exhibit the strongest NDP support and slightly higher Conservative affinity than older cohorts, while Liberal support increases steadily with age, mirroring well-documented generational differences in ideology (Uppal & Larochelle-Côté, 2012; Merkley, 2022). Education-based patterns reinforce SES cleavages: respondents with lower education levels are more likely to support the Conservatives, whereas university-educated voters favour centrist or left-leaning parties, consistent with shifting class-based alignments in Canadian elections (Polacko, 2025). Regional effects also match established electoral geography, with pronounced Conservative strength in the Prairies, concentrated NDP support in British Columbia, and Quebec’s persistent centrist or Liberal-leaning profile (Lucas & Armstrong, 2021). Taken together, these demographic and regional divides demonstrate that Canadian partisanship remains deeply structured and sufficiently stable to support reliable population-adjusted vote predictions.
+
+Turning to post-stratified estimates, these patterns come into sharper focus. The projected popular vote shares show a competitive two-party environment shaped by demographics, not random CES sample variation. The NDP trails despite strong youth and education effects, underscoring the structural disadvantage for parties with demographically concentrated support. These projections highlight the importance of demographic composition. Without post-stratification, estimates would be overly influenced by younger and more educated CES respondents, who tend to favour progressive parties. The strong alignment between predictions and observed trends boosts confidence in our modelling approach and the interpretability of our results.
+
+Despite these insights, several limitations warrant caution. The multinomial model assumes additive, linear effects on the log-odds scale, potentially overlooking interactions such as age-by-region or education-by-region differences that may further nuance vote choice. Additionally, the CES survey remains a non-probability sample; although post-stratification mitigates observable imbalances, unobserved biases stemming from political interest, internet access, and nonresponse patterns may persist. Additionally, provincial aggregation into broader regions improves statistical stability but masks intra-provincial variation, particularly in large provinces such as Ontario and British Columbia, where political dynamics differ substantially by urban–rural context.
+
+Future work could address these limitations by incorporating interaction terms, expanding the demographic dimensions used in stratification, or employing multilevel regression and post-stratification (MRP) to model vote choice at finer geographic scales. In addition, incorporating turnout modelling would produce more realistic projections, as turnout varies sharply by age and SES groups. Integrating more recent CES cycles or supplementing survey responses with administrative electoral data would also allow for tracking shifts in demographic alignments over time. Overall, this analysis demonstrates that combining survey modelling with census-based demographic weighting can yield robust, interpretable insights into the dynamics of Canadian electoral behaviour. This provides a strong foundation for more granular and comprehensive future research.
+
+# 6 Generative AI Statement
+
+We utilized ChatGPT (OpenAI) to support specific aspects of the R coding workflow, particu- larly in simulating survey questions that allowed multiple responses. While STA304 provided guidance for single-response simulations, the extension to multiple-response questions required additional procedural insight.
+
+To ensure that all analytical decisions were originated from our group, we did not use generative AI during the brainstorming or conceptual development stages. We independently conducted the data cleaning, exploratory data analysis (EDA), and background research needed to support our hypotheses with relevant literature reviews. Generative AI tools were used only for limited scripting purposes, to help troubleshoot or streamline R functions that were not covered in class, while all interpretations completed by us.
+
+We reviewed any AI-based ideas meticulously before using them. When we relied on functions that had not been taught in class, we checked them against official documentation to confirm they worked as intended and were appropriate for our analysis. In this sense, ChatGPT served only as a support resource while we remained responsible for all decisions, interpretation, and accuracy in the final work.
+
+Moreover, we used ChatGPT to aid minor writing improvements. These included identifying and correcting grammatical and punctuation errors. To ensure that the final report displays our own academic writing tone, we only incorporated feedback from the tool selectively.
+
+# 7 Ethics Statement
+
+To ensure full transparency and reproducibility, all stages of our analytical workflow, including data preparation, variable construction, model specification, and post-stratification procedures, were documented in detail within our R scripts. The analysis presented in this report can be fully replicated by running the provided code from start to finish. The main findings of our analysis include clear patterns in predicted vote shares and demographic associations, as described in the results section. All methodological decisions reflect standard practices in survey analysis and draw on statistical tools introduced in the course.
+
+In keeping with our commitment to transparency and reproducibility, this study used only secondary data from the 2021 Canadian Election Study (CES), a public and anonymized dataset. Per the University of Toronto research ethics guidelines, using publicly available, de-identified secondary data does not require Research Ethics Board (REB) review. No data were collected from human participants, and no analysis was conducted that could reasonably re-identify respondents or link their responses to personal identities.
+
+Although the CES includes potentially sensitive information on political attitudes and voting intentions, the dataset has been rigorously de-identified by the CES research team to mitigate risks to respondents' privacy. Our analysis is conducted solely at an aggregate level, modelling predicted vote shares or demographic patterns, and we refrain from reporting any individual-level information. Consequently, this report poses minimal ethical risk and adheres to established best practices for working with publicly available survey data.
+
+\newpage
+
+# 8 Bibliography
+
+\noindent\hangindent=2em\hangafter=1 Barisonzi, M. (2021). \textit{Estimation of voter turnout by age group and gender at the 2021 general election}. Analytics and Performance Measurement. \url{https://www.elections.ca/res/rec/part/estim/estimation40_e.pdf}
+
+\noindent\hangindent=2em\hangafter=1 Daoust, J.-F., Guévremont, M., & Blais, A. (2024). The (non)-religious voter in Canadian elections. \textit{Electoral Studies, 90}, 102812. \url{https://doi.org/10.1016/j.electstud.2024.102812}
+
+\noindent\hangindent=2em\hangafter=1 Gidengil, E. (2022). Voting behaviour in Canada: The state of the discipline. \textit{Canadian Journal of Political Science, 55}(4), 1–23. \url{https://doi.org/10.1017/s0008423922000531}
+
+\noindent\hangindent=2em\hangafter=1 Kiewiet de Jonge, C. P., Langer, G., & Sinozich, S. (2018). Predicting state presidential election results using national tracking polls and multilevel regression with poststratification (MRP). \textit{Public Opinion Quarterly, 82}(3), 419–446. \url{https://doi.org/10.1093/poq/nfy023}
+
+\noindent\hangindent=2em\hangafter=1 Lucas, J., & Armstrong, D. A. (2021). Policy ideology and local ideological representation in Canada. \textit{Canadian Journal of Political Science}, 1–18. \url{https://doi.org/10.1017/s0008423921000652}
+
+\noindent\hangindent=2em\hangafter=1 McGrane, D. (2015). Socio-economic determinants of voting behaviour in Canadian provincial elections from 1988 to 2006. \textit{ResearchGate}. \url{https://www.researchgate.net/publication/265194888_Socio-Economic_Determinants_of_Voting_Behaviour_in_Canadian_Provincial_Elections_from_1988_to_2006}
+
+\noindent\hangindent=2em\hangafter=1 Merkley, E. (2022). Polarization Eh? Ideological divergence and partisan sorting in the Canadian mass public. \textit{Public Opinion Quarterly, 86}(4), 932–943. \url{https://doi.org/10.1093/poq/nfac047}
+
+\noindent\hangindent=2em\hangafter=1 Polacko, M. (2020). Party positions, income inequality, and voter turnout in Canada, 1984–2015. \textit{American Behavioral Scientist, 64}(9), 1324–1347. \url{https://doi.org/10.1177/0002764220941238}
+
+\noindent\hangindent=2em\hangafter=1 Polacko, M. (2025). Canada’s increasing class-based voting disparities amidst declining economic policy saliency. \textit{Canadian Journal of Political Science}, 1–27. \url{https://doi.org/10.1017/s0008423925100462}
+
+\noindent\hangindent=2em\hangafter=1 Stephenson, L. B., Harell, A., Rubenson, D., & Loewen, P. J. (2022). \textit{2021 Canadian Election Study (CES)}. Harvard Dataverse. \url{https://doi.org/10.7910/DVN/XBZHKC}
+
+\noindent\hangindent=2em\hangafter=1 Uppal, S., & Larochelle-Côté, S. (2012). Factors associated with voting. \textit{Perspectives on Labour and Income, Statistics Canada Catalogue No. 75-001-X}. \url{https://www150.statcan.gc.ca/n1/en/pub/75-001-x/2012001/article/11629-eng.pdf?st=n3F69haT}
+
+\newpage
+
+# 9 Appendix
+
+**Exploratory Data Analysis**
+
+```{r, include=FALSE, warning=FALSE}
+survey_raw <- read_csv("ces2021.csv")
+survey_data <- survey_raw
+```
+
+```{r, include=FALSE, warning=FALSE}
+survey_data <- survey_raw %>%
+  mutate(
+    age = pmax(18, 2021 - as.numeric(cps21_yob)),
+
+    gender = recode(as.character(cps21_genderid),
+                    "A man" = "Male",
+                    "A woman" = "Female",
+                    "Non-binary" = "Other",
+                    "1" = "Male", "2" = "Female", "3" = "Other",
+                    .default = NA_character_),
+
+    prov  = cps21_province,
+    educ  = cps21_education,
+
+    religion = cps21_religion,
+
+    born_in_canada = case_when(
+      cps21_bornin_canada == 1 ~ "Yes",
+      cps21_bornin_canada == 0 ~ "No",
+      TRUE ~ NA_character_
+    ),
+
+    income = cps21_income_number,
+
+    age_grp = cut(
+      pmax(18, 2021 - as.numeric(cps21_yob)),
+      breaks = c(18,25,35,45,55,65,120),
+      labels = c("18–24","25–34","35–44","45–54","55–64","65+"),
+      right = FALSE
+    )
+  )
+```
+
+```{r, include=FALSE, warning=FALSE}
+survey_data <- survey_data %>%
+  mutate(
+    vote_lib_cps = case_when(
+      cps21_votechoice == 1 ~ 1L,                   
+      cps21_votechoice %in% c(7, NA) ~ NA_integer_,   
+      TRUE ~ 0L                                       
+    ),
+
+    vote_lib_pes = case_when(
+      pes21_votechoice2021 == 1 ~ 1L,
+      pes21_votechoice2021 %in% c(7, NA) ~ NA_integer_,
+      TRUE ~ 0L
+    ),
+
+    vote_lib = coalesce(vote_lib_pes, vote_lib_cps)
+  )
+```
+
+```{r, include=FALSE, warning=FALSE}
+if ("pes21_votechoice2021" %in% names(survey_data )) {
+  vote_lib_pes <- ifelse(survey_data$pes21_votechoice2021 == 1, 1L,
+                         ifelse(survey_data$pes21_votechoice2021 %in% c(7, NA), NA, 0L))
+  survey_data$vote_lib <- dplyr::coalesce(vote_lib_pes, survey_data$vote_lib)
+}
+```
+
+```{r, include=FALSE, warning=FALSE}
+survey_data$vote_lib <- ifelse(survey_data$pes21_votechoice2021 == 1, 1L,
+                               ifelse(survey_data$pes21_votechoice2021 %in% c(7,8,9, NA), NA, 0L))
+```
+
+```{r, include=FALSE, warning=FALSE}
+survey_data$vote_lib <- dplyr::coalesce(
+  ifelse(survey_data$pes21_votechoice2021 == 1, 1L,
+         ifelse(survey_data$pes21_votechoice2021 %in% c(7,8,9, NA), NA, 0L)),
+  ifelse(survey_data$cps21_votechoice == 1, 1L,
+         ifelse(survey_data$cps21_votechoice %in% c(7, NA), NA, 0L))
+)
+```
+
+```{r, echo=FALSE, warning=FALSE}
+plot_pct_lib_by <- function(data, var, top_n = Inf, title = NULL, flip = TRUE) {
+  var <- rlang::enquo(var)
+  df <- data %>%
+    filter(!is.na(!!var)) %>%
+    group_by(!!var) %>%
+    summarise(pct_lib = mean(vote_lib, na.rm = TRUE), .groups = "drop") %>%
+    arrange(desc(pct_lib)) %>%
+    slice_head(n = top_n)
+
+  g <- ggplot2::ggplot(df, ggplot2::aes(x = reorder(as.character(!!var), pct_lib), y = pct_lib)) +
+    ggplot2::geom_col() +
+    ggplot2::geom_text(ggplot2::aes(label = scales::percent(pct_lib, accuracy = 0.1)),
+                       vjust = if (flip) 0.5 else -0.2, size = 3) +
+    ggplot2::scale_y_continuous(labels = scales::percent_format()) +
+    ggplot2::labs(x = NULL, y = "% Liberal", title = title %||% "Liberal support") +
+    ggplot2::theme(plot.title = ggplot2::element_text(face = "bold"))
+  if (flip) g + ggplot2::coord_flip() else g
+}
+
+survey_data %>%
+  summarise(pct_lib = mean(vote_lib, na.rm = TRUE)) %>%
+  ggplot2::ggplot(ggplot2::aes(x = "Overall", y = pct_lib)) +
+  ggplot2::geom_col(width = 0.4) +
+  ggplot2::geom_text(ggplot2::aes(label = scales::percent(pct_lib, accuracy = 0.1)), vjust = -0.2) +
+  ggplot2::scale_y_continuous(labels = scales::percent_format(), limits = c(0, 1)) +
+  ggplot2::labs(x = NULL, y = "% Liberal", title = "Fig. A1: Overall Liberal support") +
+  ggplot2::theme(plot.title = ggplot2::element_text(face = "bold", hjust = 0.5))
+
+
+```
+
+Figure A1 shows that the Liberal Party receives approximately one-third of overall support in the CES sample, reflecting its position as the leading party within the survey data prior to demographic adjustment.
+
+```{r, echo=FALSE, warning=FALSE}
+plot_pct_lib_by(survey_data, prov,   title = "Fig. A2: Liberal support by province") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+Liberal support is highest in Ontario and the Territories as shown in Figure A2, with notably lower levels in the Prairie provinces. This provincial distribution mirrors long-standing patterns of Liberal strength in central Canada and weaker support in conservative-leaning western regions.
+
+```{r, echo=FALSE, warning=FALSE}
+plot_pct_lib_by(survey_data, gender, 
+                title = "Fig. A3: Liberal support by gender") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+In Figure A3, female respondents exhibit marginally higher Liberal support compared to male respondents, consistent with documented gender gaps in Canadian federal elections in which women tend to lean modestly toward centrist or centre-left parties.
+
+```{r, echo=FALSE, warning=FALSE}
+plot_pct_lib_by(survey_data, educ,   title = "Fig. A4: Liberal support by education") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+Figure A4 indicates that liberal support increases steadily with educational attainment. Respondents with university or postgraduate degrees are more likely to favour the Liberals, a trend consistent with research documenting ideological and SES-based gradients in Canadian voting behaviour.
+
+```{r, echo=FALSE, warning=FALSE}
+plot_pct_lib_by(survey_data, religion, top_n = 8,
+                title = "Fig. A5: Liberal support by religion (top 8)") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+Religious affiliation is a meaningful correlate of Liberal support (Figure A5): individuals with non-Christian identities or no religious affiliation report higher support, reflecting the party’s broader appeal among culturally diverse and less religious populations.
+
+```{r, echo=FALSE, warning=FALSE}
+plot_pct_lib_by(survey_data, born_in_canada,
+                title = "Fig. A6: Liberal support by place of birth") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+Figure A6 highlights that foreign-born respondents show higher levels of Liberal support than Canadian-born respondents, consistent with the well-documented alignment between immigrant communities and the Liberal Party over recent decades.
+
+```{r, include=FALSE}
+survey_data$vote_con <- ifelse(survey_data$pes21_votechoice2021 == 2, 1L,
+                               ifelse(survey_data$pes21_votechoice2021 %in% c(7,8,9, NA), NA, 0L))
+
+```
+
+```{r, include=FALSE}
+survey_data$vote_con <- dplyr::coalesce(
+  ifelse(survey_data$pes21_votechoice2021 == 2, 1L,
+         ifelse(survey_data$pes21_votechoice2021 %in% c(7,8,9, NA), NA, 0L)),
+  ifelse(survey_data$cps21_votechoice == 2, 1L,
+         ifelse(survey_data$cps21_votechoice %in% c(7, NA), NA, 0L))
+)
+
+```
+
+```{r, include=FALSE}
+mean(survey_data$vote_con, na.rm = TRUE) * 100 
+```
+
+```{r, include=FALSE}
+plot_pct_party_by <- function(data, var, vote_col, title = NULL, flip = TRUE, top_n = Inf) {
+  var <- rlang::enquo(var)
+  vote_col <- rlang::ensym(vote_col)
+  df <- data %>%
+    filter(!is.na(!!var)) %>%
+    group_by(!!var) %>%
+    summarise(pct = mean(!!vote_col, na.rm = TRUE), .groups = "drop") %>%
+    arrange(desc(pct)) %>%
+    slice_head(n = top_n)
+  
+  g <- ggplot(df, aes(x = reorder(as.character(!!var), pct), y = pct)) +
+    geom_col() +
+    geom_text(aes(label = scales::percent(pct, accuracy = 0.1)),
+              vjust = if (flip) 0.5 else -0.2, size = 3) +
+    scale_y_continuous(labels = scales::percent_format()) +
+    labs(x = NULL, y = "% Support", title = title) +
+    theme(plot.title = element_text(face = "bold"))
+  if (flip) g + coord_flip() else g
+}
+```
+
+```{r, echo=FALSE, warning=FALSE}
+# Overall
+survey_data %>%
+  summarise(pct_con = mean(vote_con, na.rm = TRUE)) %>%
+  ggplot(aes(x = "Overall", y = pct_con)) +
+  geom_col(width = 0.4, fill = "steelblue") +
+  geom_text(aes(label = scales::percent(pct_con, accuracy = 0.1)), vjust = -0.2) +
+  scale_y_continuous(labels = scales::percent_format(), limits = c(0,1)) +
+  labs(title = "Fig. A7: Overall Conservative support", x = NULL, y = "% Conservative") +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5))
+
+```
+
+Figure A7 shows that Conservative support constitutes just under one-third of respondents in the CES sample. This aligns with historical patterns of competitive but slightly trailing Conservative performance in national surveys and establishes a baseline from which subgroup variations can be assessed.
+
+```{r, echo=FALSE, warning=FALSE}
+plot_pct_party_by(
+  survey_data, prov, vote_con,
+  title = "Fig. A8: Conservative support by province"
+) + theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+Figure A8 reveals substantial regional heterogeneity in Conservative support. The Prairie provinces display the highest levels of Conservative backing, consistent with the region’s strongly right-leaning ideological orientation. Support is notably lower in Quebec and the Territories, reflecting long-standing differences in provincial political cultures and ideological landscapes.
+
+```{r, echo=FALSE, warning=FALSE}
+plot_pct_party_by(
+  survey_data, gender, vote_con,
+  title = "Fig. A9: Conservative support by gender"
+) + theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+As shown in Figure A9, male respondents exhibit higher Conservative support than female respondents. This gender gap mirrors well-documented ideological divides in Canadian voting behaviour, where men tend to lean more conservative on economic and social policy dimensions relative to women.
+
+```{r, echo=FALSE, warning=FALSE}
+plot_pct_party_by(
+  survey_data, educ, vote_con,
+  title = "Fig. A10: Conservative support by education"
+) + theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+Figure A10 illustrates a clear educational gradient in Conservative support. Individuals with lower levels of education demonstrate the highest likelihood of supporting the Conservative Party, while support declines among respondents with university or postgraduate degrees. This pattern aligns with socioeconomic cleavages in Canadian politics, where higher education is typically associated with more centrist or left-leaning preferences.
+
+```{r, echo=FALSE, warning=FALSE}
+plot_pct_party_by(
+  survey_data, religion, vote_con, top_n = 8,
+  title = "Fig. A11: Conservative support by religion"
+) + theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+Figure A11 shows that Conservative support is strongest among respondents identifying with Christian denominations. This reflects a persistent link between religiosity and conservative policy orientations in Canada, particularly on social issues. In contrast, respondents with minority or non-religious identities exhibit substantially lower Conservative support.
+
+```{r, echo=FALSE, warning=FALSE}
+plot_pct_party_by(
+  survey_data, born_in_canada, vote_con,
+  title = "Fig. A12: Conservative support by place of birth"
+) + theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+According to Figure A12, Conservative support is higher among Canadian-born respondents than among foreign-born respondents. This difference is consistent with research showing that immigrant communities—who are typically younger, more diverse, and more urban—tend to align more strongly with centrist or centre-left parties rather than conservative platforms.
+
+```{r, echo=FALSE, warning=FALSE}
+survey_data$vote_ndp <- ifelse(survey_data$pes21_votechoice2021 == 3, 1L,
+                               ifelse(survey_data$pes21_votechoice2021 %in% c(7,8,9, NA), NA, 0L))
+
+survey_data$vote_ndp <- dplyr::coalesce(
+  ifelse(survey_data$pes21_votechoice2021 == 3, 1L,
+         ifelse(survey_data$pes21_votechoice2021 %in% c(7,8,9, NA), NA, 0L)),
+  ifelse(survey_data$cps21_votechoice == 3, 1L,
+         ifelse(survey_data$cps21_votechoice %in% c(7, NA), NA, 0L))
+)
+
+
+
+survey_data %>%
+  summarise(pct_ndp = mean(vote_ndp, na.rm = TRUE)) %>%
+  ggplot(aes(x = "Overall", y = pct_ndp)) +
+  geom_col(width = 0.4, fill = "orange") +
+  geom_text(aes(label = scales::percent(pct_ndp, accuracy = 0.1)), vjust = -0.2) +
+  scale_y_continuous(labels = scales::percent_format(), limits = c(0,1)) +
+  labs(title = "Overall NDP support", x = NULL, y = "% NDP") +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5))
+
+
+```
+
+```{r, echo=FALSE, warning=FALSE}
+plot_pct_party_by(
+  survey_data, prov, vote_ndp,
+  title = "Fig. A13: NDP support by province"
+) + theme(plot.title = element_text(hjust = 0.5))
+```
+
+Figure A13 shows that NDP support varies substantially across provinces. British Columbia displays the highest levels of NDP support, consistent with the party’s historic western base and strong provincial-level performance. Support declines in provinces such as Quebec and the Atlantic region, reflecting the party’s more geographically concentrated appeal compared to the Liberals and Conservatives.
+
+```{r, echo=FALSE, warning=FALSE}
+plot_pct_party_by(
+  survey_data, gender, vote_ndp,
+  title = "Fig. A14: NDP support by gender"
+) + theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+As illustrated in Figure A14, NDP support is relatively balanced across male and female respondents, though women show slightly higher levels of support. This pattern reflects broader demographic trends in progressive voting behaviour, where younger and female voters typically express stronger preferences for left-of-centre parties.
+
+```{r, echo=FALSE, warning=FALSE}
+plot_pct_party_by(
+  survey_data, educ, vote_ndp,
+  title = "Fig. A15: NDP support by education"
+) + theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+Figure A15 reveals a clear educational gradient, with the highest NDP support observed among individuals with university and postgraduate education. This aligns with research showing that highly educated voters are more likely to endorse progressive economic and social policies, contributing to the NDP’s base among younger, urban, and university-educated populations.
+
+```{r, echo=FALSE, warning=FALSE}
+plot_pct_party_by(
+  survey_data, religion, vote_ndp, top_n = 8,
+  title = "Fig. A16: NDP support by religion"
+) + theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+Figure A16 demonstrates that NDP support is strongest among respondents with no religious affiliation and among minority faith groups. This reflects the party’s appeal among more secular and culturally diverse populations, who tend to favour progressive social policy positions aligned with the NDP’s ideological orientation.
+
+```{r, echo=FALSE, warning=FALSE}
+plot_pct_party_by(
+  survey_data, born_in_canada, vote_ndp,
+  title = "Fig. A17: NDP support by place of birth"
+) + theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+According to Figure A17, NDP support is somewhat higher among Canadian-born respondents compared with foreign-born respondents. This difference likely reflects demographic distributions, as Canadian-born respondents in the CES sample tend to be younger and more highly educated, groups that traditionally exhibit stronger NDP support.
