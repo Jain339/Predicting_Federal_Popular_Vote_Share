@@ -1,4 +1,4 @@
-# **Predicting Canadian Federal Popular Vote Using Multinomial Logit Post-Stratification**
+# **From Survey to Population: Predicting Federal Popular Vote Shares Using Multinomial Logit Post-Stratification**
 
 ### *Authors: Narae Lee, Nikita Jain, Radia Salam*
 
