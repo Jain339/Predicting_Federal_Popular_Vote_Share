@@ -33,7 +33,7 @@ We hypothesize, based on established literature, that:
 
 * Younger and more educated voters exhibit higher NDP support
 * Older and less educated voters favour the Conservative Party
-* Regional differences—especially Prairie conservatism and BC/Quebec centre-left alignment—are strong predictors of partisan choice
+* Regional differences especially Prairie conservatism and BC/Quebec centre-left alignment are strong predictors of partisan choice
 
 ---
 
