@@ -47,7 +47,7 @@ Contains 15,069 respondents with detailed demographic and vote-choice variables.
 
 Provides authoritative counts for combinations of age group, education level, and province. These data form the demographic cells required for post-stratification.
 
-Both datasets were cleaned, merged, and aligned by common demographic categories.
+Both datasets were cleaned, merged, and aligned by common demographic categories. The CES 2021 and Canadian Census 2021 datasets are not included in this repository due to size limitations and licensing/restrictions. To reproduce the analysis, place the files ces2021.csv and canada_census2021.csv in the data/ directory after downloading them from the official course page.
 
 ---
 
@@ -178,8 +178,6 @@ This produces national popular vote predictions calibrated to the actual Canadia
 Predicting_Federal_Vote_Estimates/
 ├── Predicting_Federal_Vote.qmd    # Analysis code (multinomial model + post-stratification)
 ├── Predicting_Federal_Vote.pdf    # Final rendered report
-├── ces2021.csv                    # CES survey data (not for public redistribution)
-├── canada_census2021.csv          # Census data (not for public redistribution)
 └── README.md                      # Project documentation
 ```
 
