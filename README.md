@@ -212,9 +212,39 @@ The script:
 
 ---
 
-## **Citations**
+## **Citations (APA 7th edition)**
 
-A complete bibliography is included in the PDF report.
-Sources include peer-reviewed literature on Canadian voting behaviour, partisan alignment, census methodology, and CES documentation.
+1. Barisonzi, M. (2021). *Estimation of voter turnout by age group and gender at the 2021 general election.* Analytics and Performance Measurement.
+   [https://www.elections.ca/res/rec/part/estim/estimation40_e.pdf](https://www.elections.ca/res/rec/part/estim/estimation40_e.pdf)
+
+2. Daoust, J.-F., Guévremont, M., & Blais, A. (2024). The (non)-religious voter in Canadian elections. *Electoral Studies, 90*, 102812.
+   [https://doi.org/10.1016/j.electstud.2024.102812](https://doi.org/10.1016/j.electstud.2024.102812)
+
+3. Gidengil, E. (2022). Voting behaviour in Canada: The state of the discipline. *Canadian Journal of Political Science, 55*(4), 1–23.
+   [https://doi.org/10.1017/s0008423922000531](https://doi.org/10.1017/s0008423922000531)
+
+4. Kiewiet de Jonge, C. P., Langer, G., & Sinozich, S. (2018). Predicting state presidential election results using national tracking polls and multilevel regression with poststratification (MRP). *Public Opinion Quarterly, 82*(3), 419–446.
+   [https://doi.org/10.1093/poq/nfy023](https://doi.org/10.1093/poq/nfy023)
+
+5. Lucas, J., & Armstrong, D. A. (2021). Policy ideology and local ideological representation in Canada. *Canadian Journal of Political Science*, 1–18.
+   [https://doi.org/10.1017/s0008423921000652](https://doi.org/10.1017/s0008423921000652)
+
+6. McGrane, D. (2015). Socio-economic determinants of voting behaviour in Canadian provincial elections from 1988 to 2006. *ResearchGate.*
+   [https://www.researchgate.net/publication/265194888_Socio-Economic_Determinants_of_Voting_Behaviour_in_Canadian_Provincial_Elections_from_1988_to_2006](https://www.researchgate.net/publication/265194888_Socio-Economic_Determinants_of_Voting_Behaviour_in_Canadian_Provincial_Elections_from_1988_to_2006)
+
+7. Merkley, E. (2022). Polarization Eh? Ideological divergence and partisan sorting in the Canadian mass public. *Public Opinion Quarterly, 86*(4), 932–943.
+   [https://doi.org/10.1093/poq/nfac047](https://doi.org/10.1093/poq/nfac047)
+
+8. Polacko, M. (2020). Party positions, income inequality, and voter turnout in Canada, 1984–2015. *American Behavioral Scientist, 64*(9), 1324–1347.
+   [https://doi.org/10.1177/0002764220941238](https://doi.org/10.1177/0002764220941238)
+
+9. Polacko, M. (2025). Canada’s increasing class-based voting disparities amidst declining economic policy saliency. *Canadian Journal of Political Science*, 1–27.
+   [https://doi.org/10.1017/s0008423925100462](https://doi.org/10.1017/s0008423925100462)
+
+10. Stephenson, L. B., Harell, A., Rubenson, D., & Loewen, P. J. (2022). *2021 Canadian Election Study (CES).* Harvard Dataverse.
+    [https://doi.org/10.7910/DVN/XBZHKC](https://doi.org/10.7910/DVN/XBZHKC)
+
+11. Uppal, S., & Larochelle-Côté, S. (2012). Factors associated with voting. *Perspectives on Labour and Income, Statistics Canada Catalogue No. 75-001-X.*
+    [https://www150.statcan.gc.ca/n1/en/pub/75-001-x/2012001/article/11629-eng.pdf?st=n3F69haT](https://www150.statcan.gc.ca/n1/en/pub/75-001-x/2012001/article/11629-eng.pdf?st=n3F69haT)
 
 ---
