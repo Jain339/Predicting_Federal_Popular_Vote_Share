@@ -4,21 +4,6 @@
 
 ---
 
-## **Table of Contents**
-
-* [Project Overview](#project-overview)
-* [Research Question](#research-question)
-* [Data Sources](#data-sources)
-* [Data Preparation](#data-preparation)
-* [Modeling Framework](#modeling-framework)
-* [Post-Stratification Procedure](#post-stratification-procedure)
-* [Results](#results)
-* [Repository Structure](#repository-structure)
-* [How to Reproduce](#how-to-reproduce)
-* [Citations](#citations)
-
----
-
 ## **Project Overview**
 
 This project estimates the national popular vote for Canada’s major federal parties by integrating multinomial logistic regression with census-calibrated post-stratification. By combining individual-level voting intentions from the 2021 Canadian Election Study (CES) with demographic population counts from the 2021 Canadian Census, the analysis produces population-representative predictions of partisan support. This methodological framework corrects for survey non-representativeness and demographic imbalances, enabling a structured assessment of how age, education, and regional context jointly shape predicted federal vote patterns across Canada.
